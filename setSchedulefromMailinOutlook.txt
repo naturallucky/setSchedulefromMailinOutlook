@@ -1,0 +1,197 @@
+Public Sub 選択メールのスケジュール登録()
+
+
+    If TypeName(ActiveWindow) = "Explorer" Then
+      SaveAppointmentFromMessage ActiveExplorer.Selection(1)
+    Else
+      SaveAppointmentFromMessage ActiveInspector.CurrentItem
+    End If
+    
+    '    If objItem.MessageClass = "IPM.Note" Then
+    'メールじゃないスケジュールのケースなど
+End Sub
+
+' メッセージから予定を作成する
+Private Sub SaveAppointmentFromMessage(ByVal objMail As MailItem)
+    Dim strBody As String
+    Dim strSubject As String
+    Dim strLocation As String
+    Dim strDate As String
+    Dim strStart As String
+    Dim strEnd As String
+    Dim i As Long
+    Dim objAppt As AppointmentItem
+        
+    Dim re As RegExp
+    Dim mc As MatchCollection
+    
+    Dim f As Boolean
+    Dim sts As String
+    Dim ste As String
+    
+            
+    ' スケジュール管理ソフト以外からのメールは処理しない
+    'If Not objMail.Subject Like "スケジュール登録のお知らせ*" Then
+    '    Exit Sub
+    'End If
+    ' 本文を取得
+    strBody = objMail.Body
+
+    
+    ' 本文から件名や場所などを取得
+    strSubject = GetFieldReg(strBody, "件[ 　]*名")
+    strLocation = GetFieldReg(strBody, "場[ 　]*所")
+    
+    If strSubject = "" Then
+        strSubject = GetFieldReg(strBody, "議[ 　]*題")
+    End If
+    If strSubject = "" Then
+        strSubject = GetFieldReg(strBody, "アジェンダ")
+    End If
+    If strSubject = "" Then
+        strSubject = GetFieldReg(strBody, "目[ 　]*的")
+    End If
+    
+    If strSubject = "" Then
+        strSubject = objMail.Subject
+    End If
+    
+    'MsgBox "1st get:" & strSubject & vbCrLf & "," & strLocation & "," & strDate
+    '日時を処理 (マッチ個所 0:年/日付   1:開始時刻  ～ 2:終了時刻（あれば）   3:タイトルなど（あれば）
+        Set re = New RegExp
+        're.Pattern = "([0-9]+/[0-9]+[\(\)a-zA-Z月火水目金土日]+[ 　\t]*[0-9]+\:[0-9]+)"
+        re.Pattern = "([0-9０-９]*[ 　]*[/／年]?[ 　]*[0-9０-９]+[ 　]*[/／月][ 　]*[0-9０-９]+)[ 　]*日?[ 　\t]*" _
+        & "[\(\)（）a-zA-Z月火水木金土日]*[ 　\t]*([0-9０-９]+[:：][0-9０-９]+)" _
+        & "[-ー―－～~ 　\t]*([0-9０-９]+[:：][0-9０-９]+)*[ 　\t]*([^\n]*)"
+        re.Global = True
+        re.MultiLine = True
+        
+        'MsgBox ("hi!  1-3 " & Left(strBody, 120))
+        Set mc = re.Execute(strBody)
+        f = False
+        
+        If mc.Count = 0 Then
+            f = True
+            
+            re.Pattern = "[[{【｛「]?日[ 　]*[程時付][]}】｝」]?[ 　\t]*[:：]?[ 　\t]*[^0-9０-９]*" _
+            & "([0-9０-９]*[ 　]*[/／年]?[ 　]*[0-9０-９]+[ 　]*[/／月][ 　]*[0-9０-９]+)[ 　]*日?[ 　\t]*" _
+            & "[\(\)（）a-zA-Z月火水木金土日]*[ 　\t]*([0-9０-９]+[:：時][0-9０-９]+)?分?" _
+            & "[-ー―－～~ 　\t]*([0-9０-９]+[:：][0-9０-９]+)*[ 　\t]*([^\n]*)"
+            Set mc = re.Execute(strBody)
+            
+        End If
+        
+        If mc.Count = 0 Then
+            re.Pattern = "開[催始]日[ 　\t]*[:：][ 　\t]*.+" _
+            & "([0-9０-９]*[ 　]*[/／年]?[ 　]*[0-9０-９]+[ 　]*[/／月][ 　]*[0-9０-９]+)[ 　]*日?[ 　\t]*" _
+            & "[\(\)（）a-zA-Z月火水木金土日]*[ 　\t]*([0-9０-９]+[:：時][0-9０-９]+)?分?" _
+            & "[-ー―－～~ 　\t]*([0-9０-９]+[:：時][0-9０-９]+)*分?[ 　\t]*([^\n]*)"
+            Set mc = re.Execute(strBody)
+        End If
+        
+        If mc.Count = 0 Then
+            MsgBox "日付らしいものが見つかりません。"
+            Exit Sub
+        End If
+        
+        y = ""
+        If Len(mc(0).SubMatches(0)) < 6 Then
+            y = Year(objMail.ReceivedTime) & "/"
+        End If
+        y = y & Replace(StrConv(Replace(Replace(mc(0).SubMatches(0), "月", "/"), "年", "/"), vbNarrow), " ", "")
+        
+        sts = mc(0).SubMatches(1)
+        ste = mc(0).SubMatches(2)
+        stl = Trim(mc(0).SubMatches(3))
+        
+        If ste = "" And stl <> "" Then
+            re.Pattern = "([0-9０-９]+[:：時][0-9０-９]+)"
+            Set mcsub = re.Execute(stl)
+            If mcsub.Count <> 0 Then
+                ste = mcsub(0).SubMatches(0)
+                stl = ""
+            End If
+        End If
+        sts = Replace(sts, "時", ":") '分の文字はない前提（上記までで処理)
+        ste = Replace(ste, "時", ":")
+        
+
+        If strLocation = "" And stl <> "" And stl <> "" & Chr(13) Then
+            strLocation = stl 'mc(0).SubMatches(3)
+        End If
+        
+       
+        If sts = "" Then 'Or f = True
+            
+            re.Pattern = "時?間?[ 　\t]*[:：][ 　\t]*([0-9０-９]+[:：時][0-9０-９]+)[-ー―－～~ 　\t]*([0-9０-９]+[:：時][0-9０-９]+)*"
+            Set mc = re.Execute(strBody)
+            If mc.Count = 0 Then
+                If sts <> "" Then
+                    MsgBox "日時フォーマット失敗？" & sts & " , " & ste
+                End If
+                sts = ""
+                ste = ""
+            Else
+                sts = mc(0).SubMatches(0)
+                ste = mc(0).SubMatches(1)
+            End If
+            
+            sts = Replace(sts, "時", ":")
+            ste = Replace(ste, "時", ":")
+            
+            If sts = "" Then
+                sts = "9:00"
+            End If
+            strStart = y & " " & sts
+        Else
+            strStart = y & " " & StrConv(sts, vbNarrow)
+        End If
+
+
+        If ste = "" Then
+            strEnd = y & " " & StrConv(sts, vbNarrow)
+        Else
+            strEnd = y & " " & StrConv(ste, vbNarrow)
+        End If
+
+
+    'MsgBox ("hi2! " & strLocation & " " & strStart & "～" & strEnd)
+    
+   
+    ' 取得した情報で予定アイテムを作成
+    Set objAppt = Application.CreateItem(olAppointmentItem) '予定表でなければここの引数を変え適切に処理する
+    objAppt.Subject = strSubject
+    objAppt.Location = strLocation
+    objAppt.Start = strStart
+    objAppt.End = strEnd
+    objAppt.Body = strBody
+    
+    'reminder
+    objAppt.ReminderSet = True
+    objAppt.ReminderMinutesBeforeStart = 15
+    
+    'objAppt.AllDayEvent = True
+    'objAppt.Duration = 120
+    
+    objAppt.Save
+    objAppt.Display
+
+    MsgBox ("スケジュール登録しました。(^^)b" & vbCrLf & objAppt.Subject & " : " & strStart & "～")
+
+End Sub
+' 本文から特定の情報を取得する関数
+Private Function GetFieldReg(strBody As String, strName As String)
+    Dim re As RegExp
+    Dim mc As MatchCollection
+        
+    Set re = New RegExp
+    re.Pattern = strName & "[ 　\t]*[]:： 　】」｝}][ 　\t]*(.+)"
+    Set mc = re.Execute(strBody)
+
+    If mc.Count = 0 Then
+      GetFieldReg = ""
+    Else
+      GetFieldReg = mc(0).SubMatches(0)
+    End If
+
+End Function
